@@ -16,13 +16,14 @@
 #
 #############################################################################
 
+import os
+import uuid
+import pathlib
+
 import grass.script as grass
 from grass.pygrass.modules import Module, ParallelModuleQueue
 
 from .mapset import verify_mapsets
-
-import os
-import uuid
 
 
 def check_parallel_errors(queue):
@@ -178,13 +179,13 @@ def create_grass_env(new_mapset):
     grass.run_command("g.mapset", mapset=orig_mapset, quiet=True)
 
     # Create new GISRC file for the new mapset
-    with open(newgisrc, "w") as f:
-        f.write(
-            f"GISDBASE: {gisdbase}\n"
-            f"LOCATION_NAME: {location}\n"
-            f"MAPSET: {new_mapset}\n"
-            f"GUI: text\n"
-        )
+    pathlib.Path(newgisrc).write_text(
+        f"GISDBASE: {gisdbase}\n"
+        f"LOCATION_NAME: {location}\n"
+        f"MAPSET: {new_mapset}\n"
+        f"GUI: text\n",
+        encoding="utf-8",
+    )
 
     # create new env and set new GISRC
     new_env = os.environ.copy()
