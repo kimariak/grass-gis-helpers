@@ -188,6 +188,7 @@ def create_grass_env(new_mapset):
     )
 
     # create new env and set new GISRC
+    # NOTE: shallow copy, not a deep copy
     new_env = os.environ.copy()
     new_env["GISRC"] = newgisrc
 
