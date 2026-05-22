@@ -25,6 +25,8 @@ import glob
 import os
 import subprocess
 from subprocess import PIPE
+import time
+import urllib.error
 import wget
 
 import grass.script as grass
@@ -35,13 +37,19 @@ from .raster import adjust_raster_resolution, rename_raster
 from .vector import patch_vectors
 
 
-def download_and_import_tindex(tindex_url, output, download_dir):
+def download_and_import_tindex(
+    tindex_url,
+    output,
+    download_dir,
+    max_retries=5,
+):
     """Download and import tile index from url.
 
     Args:
         tindex_url (str): URL of tile index
         output (str): The output name for the tile index
         download_dir (str): The directory where the data should be downloaded
+        max_retries (int): Maximum number of retries for downloading the data
 
     """
     cur_dir = os.getcwd()
@@ -50,8 +58,22 @@ def download_and_import_tindex(tindex_url, output, download_dir):
     try:
         os.chdir(download_dir)
         # download data
-        wget.download(tindex_url, zip_name, bar=None)
-
+        for attempt in range(max_retries):
+            try:
+                wget.download(tindex_url, zip_name, bar=None)
+                grass.message(_("Tindex download erfolgreich."))
+                break
+            except (urllib.error.URLError, urllib.error.HTTPError):
+                wait_time = 5 * (2**attempt)
+                if attempt == max_retries - 1:
+                    raise
+                grass.warning(
+                    _(
+                        "Tindex download nicht erfolgreich. Retry Versuch "
+                        f" {attempt+1}/{max_retries} in {wait_time} Sekunden."
+                    )
+                )
+                time.sleep(wait_time)
         # unzip tindex
         os.system(f"gunzip {zip_name}")
 
