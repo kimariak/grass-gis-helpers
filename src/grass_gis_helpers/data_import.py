@@ -70,8 +70,8 @@ def download_and_import_tindex(
                 grass.warning(
                     _(
                         "Tindex download nicht erfolgreich. Retry Versuch "
-                        f" {attempt+1}/{max_retries} in {wait_time} Sekunden."
-                    )
+                        f" {attempt + 1}/{max_retries} in {wait_time} Sekunden.",
+                    ),
                 )
                 time.sleep(wait_time)
         # unzip tindex
