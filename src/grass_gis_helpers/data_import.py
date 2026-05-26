@@ -61,7 +61,7 @@ def download_and_import_tindex(
         for attempt in range(max_retries):
             try:
                 wget.download(tindex_url, zip_name, bar=None)
-                grass.message(_("Tindex download erfolgreich."))
+                grass.message(_("Tindex download was successful."))
                 break
             except (urllib.error.URLError, urllib.error.HTTPError):
                 wait_time = 5 * (2**attempt)
@@ -69,9 +69,9 @@ def download_and_import_tindex(
                     raise
                 grass.warning(
                     _(
-                        "Tindex download nicht erfolgreich. Retry Versuch"
+                        "Tindex download was not successful. Retry attempt"
                         f" {attempt + 1}/{max_retries}"
-                        f" in {wait_time} Sekunden.",
+                        f" in {wait_time} seconds.",
                     ),
                 )
                 time.sleep(wait_time)
