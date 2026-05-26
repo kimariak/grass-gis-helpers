@@ -16,6 +16,10 @@
 #
 #############################################################################
 
+import os
+import uuid
+import pathlib
+
 import grass.script as grass
 from grass.pygrass.modules import Module, ParallelModuleQueue
 
@@ -33,7 +37,8 @@ def check_parallel_errors(queue):
         if proc.returncode != 0:
             # save all stderr to a variable and pass it to a GRASS
             # exception
-            errmsg = proc.outputs["stderr"].value.strip()
+            stderr = proc.outputs["stderr"].value
+            errmsg = stderr.strip() if stderr else "No stderr."
             grass.fatal(
                 _(f"\nERROR processing <{proc.get_bash()}>: {errmsg}"),
             )
@@ -94,14 +99,16 @@ def run_module_parallel(
             if proc.returncode != 0:
                 # save all stderr to a variable and pass it to a GRASS
                 # exception
-                errmsg = proc.outputs["stderr"].value.strip()
+                stderr = proc.outputs["stderr"].value
+                errmsg = stderr.strip() if stderr else "No stderr."
                 grass.fatal(
                     _(f"\nERROR by processing <{proc.get_bash()}>: {errmsg}"),
                 )
     # print all logs of successfully run modules ordered by module as GRASS
     # message
     for proc in queue.get_finished_modules():
-        msg = proc.outputs["stderr"].value.strip()
+        stderr = proc.outputs["stderr"].value
+        msg = stderr.strip() if stderr else "No stderr."
         grass.message(_(f"\nLog of {proc.get_bash()}:"))
         for msg_part in msg.split("\n"):
             if len(msg_part) > 0:
@@ -151,3 +158,38 @@ def patching_raster_results(mapsets, output):
             raster=f"{output}@{mapsets[0]},{output}",
             overwrite=True,
         )
+
+
+def create_grass_env(new_mapset):
+    """Create a new GRASS environment with new GISRC for a new mapset.
+
+    The new mapset will be created, if not exists.
+    The new environment will be returned,
+    and can be used for parallel processing.
+    """
+    env = grass.gisenv()
+    orig_mapset = env["MAPSET"]
+    gisdbase = env["GISDBASE"]
+    location = env["LOCATION_NAME"]
+    gisrc = os.environ["GISRC"]
+    newgisrc = f"{gisrc}_{uuid.uuid4().hex}"
+
+    # create new mapset, and switch back to original mapset
+    grass.run_command("g.mapset", flags="c", mapset=new_mapset, quiet=True)
+    grass.run_command("g.mapset", mapset=orig_mapset, quiet=True)
+
+    # Create new GISRC file for the new mapset
+    pathlib.Path(newgisrc).write_text(
+        f"GISDBASE: {gisdbase}\n"
+        f"LOCATION_NAME: {location}\n"
+        f"MAPSET: {new_mapset}\n"
+        f"GUI: text\n",
+        encoding="utf-8",
+    )
+
+    # create new env and set new GISRC
+    # NOTE: shallow copy, not a deep copy
+    new_env = os.environ.copy()
+    new_env["GISRC"] = newgisrc
+
+    return orig_mapset, new_env, newgisrc

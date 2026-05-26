@@ -25,6 +25,8 @@ import glob
 import os
 import subprocess
 from subprocess import PIPE
+import time
+import urllib.error
 import wget
 
 import grass.script as grass
@@ -35,13 +37,19 @@ from .raster import adjust_raster_resolution, rename_raster
 from .vector import patch_vectors
 
 
-def download_and_import_tindex(tindex_url, output, download_dir):
+def download_and_import_tindex(
+    tindex_url,
+    output,
+    download_dir,
+    max_retries=5,
+):
     """Download and import tile index from url.
 
     Args:
         tindex_url (str): URL of tile index
         output (str): The output name for the tile index
         download_dir (str): The directory where the data should be downloaded
+        max_retries (int): Maximum number of retries for downloading the data
 
     """
     cur_dir = os.getcwd()
@@ -50,8 +58,23 @@ def download_and_import_tindex(tindex_url, output, download_dir):
     try:
         os.chdir(download_dir)
         # download data
-        wget.download(tindex_url, zip_name, bar=None)
-
+        for attempt in range(max_retries):
+            try:
+                wget.download(tindex_url, zip_name, bar=None)
+                grass.message(_("Tindex download was successful."))
+                break
+            except (urllib.error.URLError, urllib.error.HTTPError):
+                wait_time = 5 * (2**attempt)
+                if attempt == max_retries - 1:
+                    raise
+                grass.warning(
+                    _(
+                        "Tindex download was not successful. Retry attempt"
+                        f" {attempt + 1}/{max_retries}"
+                        f" in {wait_time} seconds.",
+                    ),
+                )
+                time.sleep(wait_time)
         # unzip tindex
         os.system(f"gunzip {zip_name}")
 
@@ -156,6 +179,11 @@ def import_local_raster_data(
             os.path.join(local_data_dir, "**", "*.tif"),
             recursive=True,
         )
+    if not raster_files:
+        raster_files = glob.glob(
+            os.path.join(local_data_dir, "**", "*.jp2"),
+            recursive=True,
+        )
 
     # get current region
     cur_reg = grass.region()
@@ -191,12 +219,15 @@ def import_local_raster_data(
         r_import = communicate_grass_command("r.import", **kwargs)
         err_m1 = "Input raster does not overlap current computational region."
         err_m2 = "already exists and will be overwritten"
-        if err_m1 in r_import[1].decode():
+        stderr_val = r_import[1]
+        if isinstance(stderr_val, bytes):
+            stderr_val = stderr_val.decode()
+        if err_m1 in stderr_val:
             continue
-        if err_m2 in r_import[1].decode():
+        if err_m2 in stderr_val:
             pass
-        elif r_import[1].decode() != "":
-            grass.fatal(_(r_import[1].decode()))
+        elif stderr_val != "":
+            grass.fatal(_(stderr_val))
 
         # resample / interpolate data
         for band_num, band in band_dict.items():
@@ -223,12 +254,13 @@ def import_local_raster_data(
     return imported_local_data
 
 
-def get_xyz_file_infos(xyz_file, separator="space"):
+def get_xyz_file_infos(xyz_file, separator="space", skip=0):
     """Get the infos of a XYZ file to resolution, bounding box and pixelcenter.
 
     Args:
         xyz_file (str): XYZ file path to import
         separator (str): Separator of XYZ file; default is "space"
+        skip (int): Number of rows to skip within XYZ file
     Returns:
         res (float): Resolution of the XYZ file
         xyz_reg (dict): Dictionary with region of the XYZ file
@@ -273,6 +305,7 @@ def get_xyz_file_infos(xyz_file, separator="space"):
         input=xyz_file,
         flags="sg",
         separator=separator,
+        skip=skip,
     )
     xyz_reg = {
         item.split("=")[0]: float(item.split("=")[1])
@@ -290,6 +323,7 @@ def import_single_local_xyz_file(
     output,
     use_cur_reg=False,
     separator="space",
+    skip=0,
 ):
     """Import single XYZ file.
 
@@ -300,6 +334,7 @@ def import_single_local_xyz_file(
                             overlaps with the current region, otherwise it
                             will not be imported
         separator (str): Separator of XYZ file; default is "space"
+        skip (int): Number of rows to skip within XYZ file
     Returns:
         output (str): If the output is imported, otherwise return None
 
@@ -307,6 +342,7 @@ def import_single_local_xyz_file(
     res, xyz_reg, shift_needed = get_xyz_file_infos(
         xyz_file,
         separator=separator,
+        skip=skip,
     )
     # check if aoi overlaps
     if use_cur_reg:
@@ -347,6 +383,7 @@ def import_single_local_xyz_file(
         output=output,
         method="mean",
         separator=separator,
+        skip=skip,
         quiet=True,
         overwrite=True,
     )

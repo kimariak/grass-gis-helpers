@@ -25,7 +25,13 @@
 import grass.script as grass
 
 
-def adjust_raster_resolution(raster_name, output, res):
+def adjust_raster_resolution(
+    raster_name,
+    output,
+    res,
+    interp_method="bilinear",
+    type=None,
+):
     """Resample or inpolate raster to given resolution. It is important that
     the region already has the right resolution.
 
@@ -34,16 +40,26 @@ def adjust_raster_resolution(raster_name, output, res):
                            resampled/interpolated
         output (str): The name for the resampled/interpolated raster map
         res (float): The resolution to which the raster should be resampled.
+        interp_method (str): Interpolation method for resampling.
+                             Defaults to "bilinear".
+        type (str, optional): Raster type. If type="CELL" the rasampled raster
+                              values will be rounded to integer values.
+                              Defaults to None.
 
     """
     res_rast = float(
         grass.parse_command("r.info", map=raster_name, flags="g")["nsres"],
     )
+    resamp_out = output
+    if type == "CELL" and res_rast != res:
+        resamp_out = f"{output}_tmp"
     if res_rast > res:
         grass.run_command(
             "r.resamp.interp",
             input=raster_name,
-            output=output,
+            method=interp_method,
+            output=resamp_out,
+            nprocs=1,
             overwrite=True,
             quiet=True,
         )
@@ -51,13 +67,27 @@ def adjust_raster_resolution(raster_name, output, res):
         grass.run_command(
             "r.resamp.stats",
             input=raster_name,
-            output=output,
+            output=resamp_out,
             method="median",
             quiet=True,
             overwrite=True,
         )
     else:
         rename_raster(raster_name, output)
+    if resamp_out != output:
+        grass.run_command(
+            "r.mapcalc",
+            expression=f"{output} = round({resamp_out})",
+            overwrite=True,
+            quiet=True,
+        )
+        grass.run_command(
+            "g.remove",
+            type="raster",
+            name=resamp_out,
+            flags="f",
+            quiet=True,
+        )
 
 
 def create_vrt(input_raster_list, output):
