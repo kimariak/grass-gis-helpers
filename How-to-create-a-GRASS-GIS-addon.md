@@ -184,7 +184,7 @@ Choose a name depending on the "family":
 - Add license information to `*.py` file header:
 
 ```shell
-# SPDX-FileCopyrightText: (c) 2021-2025 by mundialis GmbH & Co. KG and the GRASS Development Team
+# SPDX-FileCopyrightText: (c) 2021-2026 by mundialis GmbH & Co. KG and the GRASS Development Team
 # SPDX-License-Identifier: GPL-3.0-or-later
 ```
 
