@@ -16,8 +16,11 @@ import os
 import re
 import pathlib
 import traceback
-from datetime import datetime
+from datetime import datetime, timezone
 from html.parser import HTMLParser
+from grass_gis_helpers.open_geodata_germany.federal_state import (
+    FS_ABBREVIATION,
+)
 
 import grass.script as grass
 
@@ -26,8 +29,8 @@ def get_urls_from_tindex(data_type="raster"):
     """Extract download URLs from tile index vector present in any mapset
 
     Args:
-        data_type (str): Label used in debug messages, e.g. ``"DOP"`` or
-            ``"DEM"``. Does not affect the actual query
+        data_type (str): Label used in debug messages, e.g. "DOP" or
+            "DEM". Does not affect the actual query
 
     Returns:
         list (str): Deduplicated list of HTTPS download URLs
@@ -85,6 +88,7 @@ def get_urls_from_tindex(data_type="raster"):
                 # Parse URLs from location attribute
                 urls_in_line = []
 
+                # A "location" entry can contain multiple comma-separated URLs
                 if "," in line:
                     parts = [p.strip() for p in line.split(",")]
                 else:
@@ -96,6 +100,7 @@ def get_urls_from_tindex(data_type="raster"):
 
                     urls.extend(urls_in_line)
 
+        # Deduplicate while preserving the original order
         seen = set()
         urls = [url for url in urls if not (url in seen or seen.add(url))]
 
@@ -120,10 +125,12 @@ def extract_filename_from_url(url):
 
     """
 
+    # Strip query parameters before extracting the filename
     url_clean = url.split("?")[0]
 
     filename = os.path.basename(url_clean)
 
+    # Extract actual raster filename from zip-packed downloads
     if ".zip" in url_clean:
         match = re.search(
             r"([^/]+\.(?:tif|tiff|jp2|xyz))(?:/|\.zip|$)",
@@ -133,24 +140,22 @@ def extract_filename_from_url(url):
         if match:
             filename = match.group(1)
 
+    # Remove GDAl virtual filesystem prefixes that may still be attached
     return filename.replace("/vsizip/", "").replace("vsicurl/", "")
 
 
-def get_federal_state_name(fs_abbr, fs_abbreviation_map):
+def get_federal_state_name(fs_abbr):
     """Get full name of federal state from abbreviation
 
     Args:
-        fs_abbr (str): Two-letter federal state abbreviation (e.g. ``"NW"``)
-        fs_abbreviation_map (dict): Mapping of full names to abbreviations,
-            e.g. ``{"Nordrhein-Westfalen": "NW", ...}``.  Typically imported
-            as ``FS_ABBREVIATION`` from ``grass_gis_helpers``
+        fs_abbr (str): Two-letter federal state abbreviation (e.g. "NW")
 
     Returns:
         str: Full federal state name if found, otherwise the abbreviation
 
     """
 
-    for name, abbr in fs_abbreviation_map.items():
+    for name, abbr in FS_ABBREVIATION.items():
         if abbr == fs_abbr and name != abbr:
             return name
     return fs_abbr
@@ -160,18 +165,17 @@ def get_license_and_url_from_addon(addon_name, addon_docs_root=None):
     """Parse license information and source URL from an addon HTML help file
 
     The HTML file is expected to contain structured comment blocks with
-    ``id:``, ``name:``, ``url:``, and ``source:`` fields following a ``<br>``
-    tag.
+    id, name, url, and source fields following a <br> tag.
 
     Args:
-        addon_name (str): Full addon name, e.g. ``"r.dop.import.nw"`` or
-            ``"r.idsm.import.nw"``. Needs to be given in main script
-        addon_docs_root (str | None): Path to the ``docs/html`` directory
-            Defaults to ``~/.grass8/addons/docs/html``.
+        addon_name (str): Full addon name, e.g. "r.dop.import.nw" or
+            "r.idsm.import.nw". Needs to be given in main script
+        addon_docs_root (str | None): Path to the docs/html directory
+            Defaults to ~/.grass8/addons/docs/html.
 
     Returns:
-        tuple [str | None]: ``(license_info, base_url)``
-            Both values are ``None`` when the HTML file cannot be found or
+        tuple [str | None]: (license_info, base_url)
+            Both values are "None" when the HTML file cannot be found or
             does not contain the expected fields
 
     """
@@ -224,6 +228,8 @@ def get_license_and_url_from_addon(addon_name, addon_docs_root=None):
             re.DOTALL | re.IGNORECASE,
         )
 
+        # All four fileds must be present, otherwise the license block is
+        # considered incomplete/unusable
         if not all([id_match, name_match, url_match, source_match]):
             grass.debug(f"Incomplete license block in {html_file}")
             return None, None
@@ -266,11 +272,11 @@ def get_license_and_url_from_addon(addon_name, addon_docs_root=None):
         if source_link_match:
             base_url = source_link_match.group(1).strip()
 
-        return license_info, base_url
-
     except Exception as e:
         grass.warning(f"Could not extract license/URL for {addon_name}: {e}")
         return None, None
+    else:
+        return license_info, base_url
 
 
 def collect_metadata(
@@ -287,10 +293,10 @@ def collect_metadata(
     The function determines which source files were imported using the
     following priority:
 
-    1. ``original_names`` - explicit list of filenames (e.g. from local dir)
-    2. ``download_urls`` - URLS are converted to filenames via
+    1. original_names - explicit list of filenames (e.g. from local dir)
+    2. download_urls - URLS are converted to filenames via
         :func:`extract_filename_from_url`
-    3. Fallback - the raster names in ``raster_list`` are stripped of their
+    3. Fallback - the raster names in raster_list are stripped of their
        band suffixes
 
     Args:
@@ -304,15 +310,22 @@ def collect_metadata(
             Used only for the fallback file-name derivation
 
     Returns:
-        dict: Keys: ``federal_state``, ``download_date``, ``license``,
-            ``base_url``, ``raster_names``, ``download_urls``, ``count``
+        dict: Keys: federal_state, download_date, license, base_url,
+            raster_names, download_urls, count
 
     """
 
+    # Priority 1: explicit local filenames take precedence, since they are
+    # the most accurate source of truth (e.g. from local_data_dir import)
     if original_names and len(original_names) > 0:
         source_files = original_names
+    # Priority 2: derive filenames from download URLs if no local names
+    # are available
     elif download_urls and len(download_urls) > 0:
         source_files = [extract_filename_from_url(u) for u in download_urls]
+    # Priority 3 (fallback): neither names nor URLs available -> derive
+    # source file names from the imported raster names by stripping band
+    # suffixes
     else:
         unique = set()
         for raster in raster_list:
@@ -324,7 +337,7 @@ def collect_metadata(
 
     return {
         "federal_state": fs,
-        "download_date": datetime.now().strftime("%d.%m.%Y"),
+        "download_date": datetime.now(tz=timezone.utc).strftime("%d.%m.%Y"),
         "license": license_info,
         "base_url": base_url,
         "raster_names": sorted(set(source_files)),
@@ -333,10 +346,77 @@ def collect_metadata(
     }
 
 
+def _write_licenses(f, metadata_list):
+    """Write license section to markdown file"""
+    f.write("## Lizenzen\n\n")
+    # Multiple federal states can share the same license text; only write
+    # each distinct license once
+    seen_licenses = set()
+    for fs_meta in metadata_list:
+        fs_name = get_federal_state_name(fs_meta["federal_state"])
+        lic = fs_meta["license"]
+        if lic not in seen_licenses:
+            seen_licenses.add(lic)
+            f.write(f"**{fs_name}:** {lic}\n\n")
+
+
+def _write_raster_name(f, name, data_label):
+    """Write a single raster name entry to markdown file"""
+    if name.startswith("WMS"):
+        # Special encoding used for WMS-based imports, e.g.
+        # "WMS_RGB:<url>|LAYER:<layer>" -> parsed into key/value pairs
+        parts = dict(
+            item.split(":", 1) for item in name.split("|") if ":" in item
+        )
+        wms_url = next(
+            (v for k, v in parts.items() if k.startswith("WMS")),
+            "",
+        )
+        layer = parts.get("LAYER", "")
+        f.write(f"- WMS: [{layer}]({wms_url})\n")
+        return False
+    elif f"{data_label}-Kacheln" in name or "via WMS" in name:
+        # Pre-formatted tile-count summary string (e.g. "12 DOP-Kachel(n)"),
+        # written as-is instead of as a bullet point
+        f.write(f"{name}\n\n")
+        return True
+    else:
+        f.write(f"- `{name}`\n")
+        return False
+
+
+def _write_fs_section(f, fs_meta, fs_name, data_label):
+    """Write downloaded files section for one federal state"""
+    base_url = fs_meta["base_url"]
+    f.write(
+        f"### Folgende {data_label}s wurden aus {fs_name} "
+        f"({base_url}) bezogen:\n\n",
+    )
+
+    # Preferred case: actual donwload URLs are available -> link each file
+    if fs_meta.get("download_urls"):
+        for url in fs_meta["download_urls"]:
+            filename = extract_filename_from_url(url)
+            f.write(f"- [{filename}]({url})\n")
+        f.write(f"\n**Anzahl:** {fs_meta['count']}\n\n")
+    else:
+        # Fallback case: only raster/file names (or a tile-count summary)
+        # are available
+        has_tile_count_line = False
+        for name in fs_meta["raster_names"]:
+            if _write_raster_name(f, name, data_label):
+                has_tile_count_line = True
+        # Avoid a redundant "Anzahl" line if a tile-count summary was
+        # already written by _write_raster_name
+        if not has_tile_count_line:
+            f.write(f"\n**Anzahl:** {fs_meta['count']}\n\n")
+        else:
+            f.write("\n")
+
+
 def write_metadata_markdown(
     metadata_list,
     metadata_path,
-    fs_abbreviation_map,
     data_label="Raster",
     mapset=None,
 ):
@@ -345,15 +425,13 @@ def write_metadata_markdown(
     Args:
         metadata_list (list): One dict per federal state as returned by
             :func:`collect_metadata`
-        metadata_path (str): Destination file path. A ``.md`` extension is
+        metadata_path (str): Destination file path. A .md extension is
             appended automatically if missing. Pass an empty string or
-            ``None`` to skip writing
-        fs_abbreviation_map (dict): mapping used by
-            :func:`get_federal_state_name`
+            "None" to skip writing
         data_label (str): Human-readable label for the data type, e.g.
-            ``"DOP"`` or ``"DEM"``. Used in section headings
+            "DOP" or "DEM". Used in section headings
         mapset (str | None): GRASS mapset name for the file header. Falls
-            back to the current mapset when ``None``
+            back to the current mapset when "None"
 
     """
 
@@ -389,78 +467,22 @@ def write_metadata_markdown(
 
             if metadata_list:
                 f.write(
-                    f"**Downloaddatum:** {metadata_list[0]['download_date']}\n\n",
+                    "**Downloaddatum:** "
+                    f"{metadata_list[0]['download_date']}\n\n",
                 )
 
-            # Licenses
-            f.write("## Lizenzen\n\n")
-            seen_licenses = set()
-            for fs_meta in metadata_list:
-                fs_name = get_federal_state_name(
-                    fs_meta["federal_state"], fs_abbreviation_map
-                )
-                lic = fs_meta["license"]
-                if lic not in seen_licenses:
-                    seen_licenses.add(lic)
-                    f.write(f"**{fs_name}:** {lic}\n\n")
+            _write_licenses(f, metadata_list)
 
-            # Downloaded files
             f.write(f"## Heruntergeladene {data_label}s\n\n")
-
             for fs_meta in metadata_list:
-                fs_name = get_federal_state_name(
-                    fs_meta["federal_state"], fs_abbreviation_map
-                )
-                base_url = fs_meta["base_url"]
-
-                f.write(
-                    f"### Folgende {data_label}s wurden aus {fs_name} "
-                    f"({base_url}) bezogen:\n\n",
-                )
-
-                # Show file name with link if URLs are found
-                if fs_meta.get("download_urls"):
-                    for url in fs_meta["download_urls"]:
-                        filename = extract_filename_from_url(url)
-                        f.write(f"- [{filename}]({url})\n")
-                    f.write(f"\n**Anzahl:** {fs_meta['count']}\n\n")
-
-                else:
-                    has_tile_count_line = False
-                    for name in fs_meta["raster_names"]:
-                        if name.startswith("WMS"):
-                            parts = dict(
-                                item.split(":", 1)
-                                for item in name.split("|")
-                                if ":" in item
-                            )
-                            wms_url = next(
-                                (
-                                    v
-                                    for k, v in parts.items()
-                                    if k.startswith("WMS")
-                                ),
-                                "",
-                            )
-                            layer = parts.get("LAYER", "")
-                            f.write(f"- WMS: [{layer}]({wms_url})\n")
-                        elif (
-                            f"{data_label}-Kacheln" in name
-                            or "via WMS" in name
-                        ):
-                            f.write(f"{name}\n\n")
-                            has_tile_count_line = True
-                        else:
-                            f.write(f"- `{name}`\n")
-
-                    if not has_tile_count_line:
-                        f.write(f"\n**Anzahl:** {fs_meta['count']}\n\n")
-                    else:
-                        f.write("\n")
+                fs_name = get_federal_state_name(fs_meta["federal_state"])
+                _write_fs_section(f, fs_meta, fs_name, data_label)
 
             # Additional info
             f.write("---\n\n")
-            f.write(f"*Erstellt am {datetime.now().strftime('%d.%m.%Y')}\n")
+            f.write(f"*Erstellt am {datetime.now(
+                tz=timezone.utc
+            ).strftime('%d.%m.%Y')}\n")
 
         grass.message(_(f"Metadata file created: {metadata_path}"))
 
