@@ -16,9 +16,10 @@ import os
 import re
 import pathlib
 import traceback
-import grass.script as grass
 from datetime import datetime, timezone
 from html.parser import HTMLParser
+
+import grass.script as grass
 from grass_gis_helpers.open_geodata_germany.federal_state import (
     FS_ABBREVIATION,
 )
@@ -26,14 +27,15 @@ from grass_gis_helpers.open_geodata_germany.federal_state import (
 
 def get_urls_from_tindex(data_type="raster"):
     """Extract download URLs from tile index vector present in any mapset.
+
     Args:
         data_type (str): Label used in debug messages, e.g. "DOP" or
-            "DEM". Does not affect the actual query
+            "DEM". Does not affect the actual query.
 
     Returns:
         list (str): Deduplicated list of HTTPS download URLs
-    """
 
+    """
     gisenv = grass.gisenv()
     current_mapset = gisenv["MAPSET"]
 
@@ -113,13 +115,14 @@ def get_urls_from_tindex(data_type="raster"):
 
 def extract_filename_from_url(url):
     """Extract filename from a download URL.
+
     Args:
-        url (str): Download URL
+        url (str): Download URL.
 
     Returns:
         str: filename derived from the URL
-    """
 
+    """
     # Strip query parameters before extracting the filename
     url_clean = url.split("?")[0]
 
@@ -141,13 +144,14 @@ def extract_filename_from_url(url):
 
 def get_federal_state_name(fs_abbr):
     """Get full name of federal state from abbreviation.
+
     Args:
-        fs_abbr (str): Two-letter federal state abbreviation (e.g. "NW")
+        fs_abbr (str): Two-letter federal state abbreviation (e.g. "NW").
 
     Returns:
         str: Full federal state name if found, otherwise the abbreviation
-    """
 
+    """
     for name, abbr in FS_ABBREVIATION.items():
         if abbr == fs_abbr and name != abbr:
             return name
@@ -169,8 +173,8 @@ def get_license_and_url_from_addon(addon_name, addon_docs_root=None):
         tuple [str | None]: (license_info, base_url)
             Both values are "None" when the HTML file cannot be found or
             does not contain the expected fields
-    """
 
+    """
     try:
         if addon_docs_root is None:
             addon_docs_root = os.path.join(
@@ -232,7 +236,7 @@ def get_license_and_url_from_addon(addon_name, addon_docs_root=None):
 
         # Remove html tags from source info
         class MLStripper(HTMLParser):
-            """Removes html tags from source info"""
+            """Removes html tags from source info."""
 
             def __init__(self) -> None:
                 super().__init__()
@@ -241,11 +245,11 @@ def get_license_and_url_from_addon(addon_name, addon_docs_root=None):
                 self.text = []
 
             def handle_data(self, data) -> None:
-                """Callback called by HTML parser for each text node found"""
+                """Callback called by HTML parser for each text node found."""
                 self.text.append(data)
 
             def get_data(self) -> str:
-                """Combines collected text parts into one string"""
+                """Combines collected text parts into one string."""
                 return "".join(self.text)
 
         s = MLStripper()
@@ -284,6 +288,7 @@ def collect_metadata(
     band_suffixes=("_red", "_green", "_blue", "_nir"),
 ):
     """Collect metadata dictionary for downloaded rasters for federal state.
+
     The function determines which source files were imported using the
     following priority:
 
@@ -306,8 +311,8 @@ def collect_metadata(
     Returns:
         dict: Keys: federal_state, download_date, license, base_url,
             raster_names, download_urls, count
-    """
 
+    """
     # Priority 1: explicit local filenames take precedence, since they are
     # the most accurate source of truth (e.g. from local_data_dir import)
     if original_names and len(original_names) > 0:
@@ -415,6 +420,7 @@ def write_metadata_markdown(
     mapset=None,
 ):
     """Write Markdown metadata file summarising the import run.
+
     Args:
         metadata_list (list): One dict per federal state as returned by
             :func:`collect_metadata`
@@ -424,9 +430,9 @@ def write_metadata_markdown(
         data_label (str): Human-readable label for the data type, e.g.
             "DOP" or "DEM". Used in section headings
         mapset (str | None): GRASS mapset name for the file header. Falls
-            back to the current mapset when "None"
-    """
+            back to the current mapset when "None".
 
+    """
     # Don't write metadata file if path not set
     if not metadata_path or metadata_path == "":
         grass.message(
