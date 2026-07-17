@@ -30,8 +30,8 @@ system, only the core libraries are needed as a minimum.
 
 A GRASS python module consists of
 
-- Makefile
-- html documentation file
+- Makefile (example see [r.dop.import](https://github.com/mundialis/r.dop.import/blob/main/r.dop.import.bb.be/Makefile))
+- README.md: md documentation file
 - either a python script (most easy with one script as whole addon)
 - or C code
 
