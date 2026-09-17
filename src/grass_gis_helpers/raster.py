@@ -126,8 +126,8 @@ def create_vrt(input_raster_list, output, copy_raster_maps=True):
         )
 
 
-def clip_raster(input_raster, output, aoi=None, region=None)
-    """Clip the VRT to a given aoi or region.
+def clip_raster(input_raster, output, aoi=None, region=None):
+    """Clip the raster (VRT) to a given aoi or region.
 
     Args:
         input_raster (str): Name of input raster map
